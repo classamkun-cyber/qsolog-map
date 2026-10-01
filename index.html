@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>QSOLOG運用地マップ（Webアプリ版）</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; background: #1e1e1e; }
+  #map { width: 100%; height: 100vh; }
+  #status {
+    position: absolute; top: 8px; left: 8px; z-index: 1000;
+    background: rgba(30,30,30,0.85); color: #eee; font-family: sans-serif;
+    font-size: 13px; padding: 6px 10px; border-radius: 6px;
+  }
+  .qso-popup { font-family: sans-serif; font-size: 13px; line-height: 1.6; min-width: 160px; }
+  .qso-popup .qso-title { font-weight: bold; font-size: 14px; margin-bottom: 4px; display: block; }
+  .qso-popup .qso-row { display: flex; align-items: center; gap: 6px; }
+  .qso-popup .qso-icon { width: 1.4em; display: inline-block; text-align: center; }
+  .leaflet-popup-content-wrapper { background: #2b2b2b; color: #eee; }
+  .leaflet-popup-tip { background: #2b2b2b; }
+</style>
+</head>
+<body>
+<div id="status">読み込み中...</div>
+<div id="map"></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+// ===== 設定 =====
+const API_KEY = "AIzaSyDuuX_9cIC-TiUP41NdQOhD8OTI885GAgY"; // Drive API（読み取り専用・Drive API限定）
+const FOLDER_ID = "1LT5sBEmGKE9n8eEbqIuICZatIsz3mo3y"; // QSOLOG_WebApp フォルダ（統合ファイル all.geojson 置き場）
+const CACHE_KEY = "qsolog-map-cache-v1";
+
+// バンド別・線色（Obsidian版ビューアと同じ配色）
+const bandColors = {
+  "3.5": "#16a085",
+  "7": "#c0392b",
+  "14": "#d35400",
+  "18": "#8e44ad",
+  "21": "#9b59b6",
+  "28": "#e67e22",
+  "50": "#f1c40f",
+  "144": "#2ecc71",
+  "430": "#3388ff"
+};
+// モード別・線色上書き（デジタル系のみ。音声系はバンド色のまま）
+const modeColorOverride = {
+  "DV": "#ffffff",
+  "FT8": "#ff1493",
+  "FT4": "#ff69b4",
+  "CW": "#7f8c8d"
+};
+
+const statusEl = document.getElementById("status");
+
+const map = L.map("map").setView([34.9, 136.4], 7);
+L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png", {
+  maxZoom: 18,
+  attribution: "&copy; <a href='https://maps.gsi.go.jp/development/ichiran.html'>国土地理院</a>"
+}).addTo(map);
+
+function lineColorFor(props) {
+  const override = modeColorOverride[props.mode];
+  if (override) return override;
+  return bandColors[String(props.band)] || "#3388ff";
+}
+
+function pointStyleFor(props) {
+  if (props.role === "my_location") {
+    return { radius: 7, color: "#fff", weight: 1, fillColor: "#e74c3c", fillOpacity: 1 };
+  }
+  // qth（相手QTH）
+  return { radius: 6, color: "#fff", weight: 1, fillColor: "#7f8c8d", fillOpacity: 1 };
+}
+
+function escapeHtml(s) {
+  return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+  }[c]));
+}
+
+function popupHtmlFor(props) {
+  props = props || {};
+  const role = props.role;
+
+  if (role === "my_location") {
+    // title例: "青山高原第７（運用地）"
+    const name = (props.title || "").replace(/（運用地）\s*$/, "");
+    return `
+      <div class="qso-popup">
+        <span class="qso-title">📍 ${escapeHtml(name)}</span>
+        <div class="qso-row"><span class="qso-icon">🏠</span>自分の運用地</div>
+      </div>`;
+  }
+
+  if (role === "qth") {
+    // title例: "2026-09-06 JP2BAL（愛知県豊川市）"
+    const m = (props.title || "").match(/^(\S+)\s+(\S+)(?:（(.+)）)?$/);
+    const place = m && m[3] ? m[3] : "";
+    return `
+      <div class="qso-popup">
+        <span class="qso-title">📡 ${escapeHtml(props.callsign || "")}</span>
+        <div class="qso-row"><span class="qso-icon">📅</span>${escapeHtml(props.date || "")}</div>
+        <div class="qso-row"><span class="qso-icon">📶</span>${escapeHtml(props.band || "")}MHz ${escapeHtml(props.mode || "")}</div>
+        ${place ? `<div class="qso-row"><span class="qso-icon">🗾</span>${escapeHtml(place)}</div>` : ""}
+      </div>`;
+  }
+
+  if (role === "line") {
+    // title例: "2026-09-06 青山高原第７ → JP2BAL"
+    const m = (props.title || "").match(/^\S+\s+(.+?)\s*→\s*(.+)$/);
+    const from = m ? m[1] : "";
+    const to = m ? m[2] : (props.callsign || "");
+    return `
+      <div class="qso-popup">
+        <span class="qso-title">📡 ${escapeHtml(props.callsign || to)}</span>
+        <div class="qso-row"><span class="qso-icon">📅</span>${escapeHtml(props.date || "")}</div>
+        <div class="qso-row"><span class="qso-icon">📶</span>${escapeHtml(props.band || "")}MHz ${escapeHtml(props.mode || "")}</div>
+        ${from ? `<div class="qso-row"><span class="qso-icon">🔁</span>${escapeHtml(from)} → ${escapeHtml(to)}</div>` : ""}
+      </div>`;
+  }
+
+  return props.title ? `<div class="qso-popup">${escapeHtml(props.title)}</div>` : "";
+}
+
+function addGeoJsonToMap(geojson) {
+  L.geoJSON(geojson, {
+    pointToLayer: function (feature, latlng) {
+      return L.circleMarker(latlng, pointStyleFor(feature.properties || {}));
+    },
+    style: function (feature) {
+      if (feature.geometry && feature.geometry.type === "LineString") {
+        return { color: lineColorFor(feature.properties || {}), weight: 3, opacity: 0.8 };
+      }
+      return {};
+    },
+    onEachFeature: function (feature, layer) {
+      const html = popupHtmlFor(feature.properties);
+      if (!html) return;
+      layer.bindPopup(html);
+      // PCではマウスオーバーでも表示（タップ操作のスマホ・タブレットではクリックのまま動く）
+      layer.on("mouseover", function () { layer.openPopup(); });
+      layer.on("mouseout", function () { layer.closePopup(); });
+    }
+  }).addTo(map);
+}
+
+function readCache() {
+  try {
+    return JSON.parse(localStorage.getItem(CACHE_KEY) || "null");
+  } catch (e) {
+    return null;
+  }
+}
+
+function writeCache(modifiedTime, geojson) {
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify({ modifiedTime, geojson }));
+  } catch (e) {
+    console.warn("キャッシュ保存に失敗（容量制限など）", e);
+  }
+}
+
+// 統合ファイル(all.geojson)だけを取得する方式。
+// 以前は1QSO=1ファイルを個別に取得していたため件数ぶんリクエストが発生し、
+// Google側の自動アクセス検知でブロックされることがあった（2026-10-01）。
+// フォルダ内のファイル一覧取得(1回)＋更新があった時だけ本体取得(1回)に抑える。
+async function loadAll() {
+  try {
+    statusEl.textContent = "読み込み中...";
+    const listUrl = `https://www.googleapis.com/drive/v3/files?q='${FOLDER_ID}'+in+parents&fields=files(id,name,modifiedTime)&pageSize=10&key=${API_KEY}`;
+    const listRes = await fetch(listUrl);
+    if (!listRes.ok) throw new Error(`ファイル一覧取得エラー: ${listRes.status}`);
+    const listJson = await listRes.json();
+    const file = (listJson.files || []).find((f) => f.name === "all.geojson");
+    if (!file) throw new Error("all.geojson が見つかりません");
+
+    const cache = readCache();
+    let geojson;
+    if (cache && cache.modifiedTime === file.modifiedTime) {
+      geojson = cache.geojson;
+      statusEl.textContent = "読み込み中...（キャッシュ利用）";
+    } else {
+      const contentUrl = `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media&key=${API_KEY}`;
+      const contentRes = await fetch(contentUrl);
+      if (!contentRes.ok) throw new Error(`本体取得エラー: ${contentRes.status}`);
+      geojson = await contentRes.json();
+      writeCache(file.modifiedTime, geojson);
+    }
+
+    addGeoJsonToMap(geojson);
+    const count = (geojson.features || []).length;
+    statusEl.textContent = `QSOLOG運用地マップ（${count} features）`;
+  } catch (e) {
+    console.error(e);
+    statusEl.textContent = "読み込みエラー: " + e.message;
+  }
+}
+
+loadAll();
+</script>
+</body>
+</html>
