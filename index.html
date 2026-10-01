@@ -124,26 +124,34 @@ function popupHtmlFor(props) {
   return props.title ? `<div class="qso-popup">${escapeHtml(props.title)}</div>` : "";
 }
 
-function addGeoJsonToMap(geojson) {
-  L.geoJSON(geojson, {
-    pointToLayer: function (feature, latlng) {
-      return L.circleMarker(latlng, pointStyleFor(feature.properties || {}));
-    },
-    style: function (feature) {
-      if (feature.geometry && feature.geometry.type === "LineString") {
-        return { color: lineColorFor(feature.properties || {}), weight: 3, opacity: 0.8 };
-      }
-      return {};
-    },
-    onEachFeature: function (feature, layer) {
-      const html = popupHtmlFor(feature.properties);
-      if (!html) return;
-      layer.bindPopup(html);
-      // PCではマウスオーバーでも表示（タップ操作のスマホ・タブレットではクリックのまま動く）
-      layer.on("mouseover", function () { layer.openPopup(); });
-      layer.on("mouseout", function () { layer.closePopup(); });
+const commonGeoJsonOptions = {
+  pointToLayer: function (feature, latlng) {
+    return L.circleMarker(latlng, pointStyleFor(feature.properties || {}));
+  },
+  style: function (feature) {
+    if (feature.geometry && feature.geometry.type === "LineString") {
+      return { color: lineColorFor(feature.properties || {}), weight: 3, opacity: 0.8 };
     }
-  }).addTo(map);
+    return {};
+  },
+  onEachFeature: function (feature, layer) {
+    const html = popupHtmlFor(feature.properties);
+    if (!html) return;
+    layer.bindPopup(html);
+    // PCではマウスオーバーでも表示（タップ操作のスマホ・タブレットではクリックのまま動く）
+    layer.on("mouseover", function () { layer.openPopup(); });
+    layer.on("mouseout", function () { layer.closePopup(); });
+  }
+};
+
+function addGeoJsonToMap(geojson) {
+  const features = geojson.features || [];
+  // 線を先・ピンを後に描画することで、ピンが常に線の上に来るようにする
+  const lines = features.filter((f) => f.geometry && f.geometry.type === "LineString");
+  const points = features.filter((f) => f.geometry && f.geometry.type === "Point");
+
+  L.geoJSON({ type: "FeatureCollection", features: lines }, commonGeoJsonOptions).addTo(map);
+  L.geoJSON({ type: "FeatureCollection", features: points }, commonGeoJsonOptions).addTo(map);
 }
 
 function readCache() {
