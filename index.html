@@ -168,19 +168,20 @@ function groupFeaturesByCoordinates(features) {
   return Array.from(groups.values());
 }
 
+// ⚠️ 線はqthと同じ座標（JCC/JCGの市区町村代表点）を終点にしているため、
+//    同じ市区町村内の別々の相手局への線が重なって1本にまとまることがある。
+//    そのためタイトルは特定のコールサインにせず、行ごとにコールサインを明記する。
 function popupHtmlForLineGroup(sortedGroup) {
   const first = sortedGroup[0].properties || {};
   const m = (first.title || "").match(/^\S+\s+(.+?)\s*→\s*(.+)$/);
   const from = m ? m[1] : "";
-  const to = m ? m[2] : (first.callsign || "");
   const rows = sortedGroup.map((f) => {
     const p = f.properties || {};
-    return `<div class="qso-row"><span class="qso-icon">📅</span>${escapeHtml(p.date || "")}｜${escapeHtml(p.band || "")}MHz ${escapeHtml(p.mode || "")}</div>`;
+    return `<div class="qso-row"><span class="qso-icon">📅</span>${escapeHtml(p.date || "")}｜${escapeHtml(p.callsign || "")}｜${escapeHtml(p.band || "")}MHz ${escapeHtml(p.mode || "")}</div>`;
   }).join("");
   return `
     <div class="qso-popup">
-      <span class="qso-title">📡 ${escapeHtml(to)}（${sortedGroup.length}件）</span>
-      ${from ? `<div class="qso-row"><span class="qso-icon">🔁</span>${escapeHtml(from)} → ${escapeHtml(to)}</div>` : ""}
+      <span class="qso-title">🔁 ${escapeHtml(from)}からの交信（${sortedGroup.length}件）</span>
       <div class="qso-rows">${rows}</div>
     </div>`;
 }
@@ -198,7 +199,7 @@ function popupHtmlForPointGroup(sortedGroup) {
     const name = (first.title || "").replace(/（運用地）\s*$/, "");
     const rows = sortedGroup.map((f) => {
       const p = f.properties || {};
-      return `<div class="qso-row"><span class="qso-icon">📅</span>${escapeHtml(p.date || "")}｜${escapeHtml(p.band || "")}MHz ${escapeHtml(p.mode || "")}</div>`;
+      return `<div class="qso-row"><span class="qso-icon">📅</span>${escapeHtml(p.date || "")}｜${escapeHtml(p.callsign || "")}｜${escapeHtml(p.band || "")}MHz ${escapeHtml(p.mode || "")}</div>`;
     }).join("");
     return `
       <div class="qso-popup">
