@@ -14,6 +14,8 @@
 <link rel="apple-touch-icon" sizes="180x180" href="icon-180.png">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
 <style>
   html, body { margin: 0; padding: 0; height: 100%; background: #1e1e1e; }
   #map { width: 100%; height: 100vh; }
@@ -43,6 +45,7 @@
 <div id="map"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 <script>
 // ===== 設定 =====
 const API_KEY = "AIzaSyDuuX_9cIC-TiUP41NdQOhD8OTI885GAgY"; // Drive API（読み取り専用・Drive API限定）
@@ -153,34 +156,72 @@ function popupHtmlFor(props) {
   return props.title ? `<div class="qso-popup">${escapeHtml(props.title)}</div>` : "";
 }
 
-const commonGeoJsonOptions = {
-  pointToLayer: function (feature, latlng) {
-    return L.marker(latlng, { icon: pointIconFor(feature.properties || {}) });
-  },
-  style: function (feature) {
-    if (feature.geometry && feature.geometry.type === "LineString") {
-      return { color: lineColorFor(feature.properties || {}), weight: 3, opacity: 0.8 };
-    }
-    return {};
-  },
-  onEachFeature: function (feature, layer) {
-    const html = popupHtmlFor(feature.properties);
-    if (!html) return;
-    layer.bindPopup(html);
-    // PCではマウスオーバーでも表示（タップ操作のスマホ・タブレットではクリックのまま動く）
-    layer.on("mouseover", function () { layer.openPopup(); });
-    layer.on("mouseout", function () { layer.closePopup(); });
+// 両端の座標が完全一致する線をまとめ、ポップアップにその組み合わせの全QSOをリスト表示する
+// （同じ運用地×同じ相手の組み合わせが繰り返されると線が重なって見分けられなくなるため）
+function groupLinesByEndpoints(lines) {
+  const groups = new Map();
+  for (const f of lines) {
+    const coords = (f.geometry && f.geometry.coordinates) || [];
+    const key = JSON.stringify(coords);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(f);
   }
-};
+  return Array.from(groups.values());
+}
+
+function popupHtmlForLineGroup(sortedGroup) {
+  const first = sortedGroup[0].properties || {};
+  const m = (first.title || "").match(/^\S+\s+(.+?)\s*→\s*(.+)$/);
+  const from = m ? m[1] : "";
+  const to = m ? m[2] : (first.callsign || "");
+  const rows = sortedGroup.map((f) => {
+    const p = f.properties || {};
+    return `<div class="qso-row"><span class="qso-icon">📅</span>${escapeHtml(p.date || "")}｜${escapeHtml(p.band || "")}MHz ${escapeHtml(p.mode || "")}</div>`;
+  }).join("");
+  return `
+    <div class="qso-popup">
+      <span class="qso-title">📡 ${escapeHtml(to)}（${sortedGroup.length}件）</span>
+      ${from ? `<div class="qso-row"><span class="qso-icon">🔁</span>${escapeHtml(from)} → ${escapeHtml(to)}</div>` : ""}
+      ${rows}
+    </div>`;
+}
+
+function bindHoverPopup(layer, html) {
+  if (!html) return;
+  layer.bindPopup(html);
+  // PCではマウスオーバーでも表示（タップ操作のスマホ・タブレットではクリックのまま動く）
+  layer.on("mouseover", function () { layer.openPopup(); });
+  layer.on("mouseout", function () { layer.closePopup(); });
+}
 
 function addGeoJsonToMap(geojson) {
   const features = geojson.features || [];
-  // 線を先・ピンを後に描画することで、ピンが常に線の上に来るようにする
   const lines = features.filter((f) => f.geometry && f.geometry.type === "LineString");
   const points = features.filter((f) => f.geometry && f.geometry.type === "Point");
 
-  L.geoJSON({ type: "FeatureCollection", features: lines }, commonGeoJsonOptions).addTo(map);
-  L.geoJSON({ type: "FeatureCollection", features: points }, commonGeoJsonOptions).addTo(map);
+  // ---- 線：同じ区間（両端の座標が同じ）は1本にまとめて描画 ----
+  const lineGroups = groupLinesByEndpoints(lines);
+  lineGroups.forEach((group) => {
+    const sorted = group.slice().sort((a, b) => String(b.properties && b.properties.date).localeCompare(String(a.properties && a.properties.date)));
+    const latest = sorted[0];
+    const latlngs = (latest.geometry.coordinates || []).map((c) => [c[1], c[0]]);
+    const polyline = L.polyline(latlngs, { color: lineColorFor(latest.properties || {}), weight: 3, opacity: 0.8 });
+    const html = sorted.length > 1 ? popupHtmlForLineGroup(sorted) : popupHtmlFor(latest.properties);
+    bindHoverPopup(polyline, html);
+    polyline.addTo(map);
+  });
+
+  // ---- 点：同じ場所に何件も重なるのでクラスタリング（タップで放射状に分離） ----
+  const cluster = L.markerClusterGroup({ maxClusterRadius: 40 });
+  points.forEach((f) => {
+    const coords = (f.geometry && f.geometry.coordinates) || [0, 0];
+    const marker = L.marker([coords[1], coords[0]], { icon: pointIconFor(f.properties || {}) });
+    bindHoverPopup(marker, popupHtmlFor(f.properties));
+    cluster.addLayer(marker);
+  });
+  // マーカーのpaneはLeafletの既定で線（overlayPane）より上に表示されるため、
+  // 線を先・クラスタを後に addTo しておけば常にピンが線の上に来る
+  cluster.addTo(map);
 }
 
 function readCache() {
