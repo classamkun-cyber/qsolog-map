@@ -183,18 +183,21 @@ function popupHtmlForLineGroup(sortedGroup) {
     </div>`;
 }
 
-// 同じ座標に重なる点（同じ運用地からの複数QSO／同じ相手との複数回交信）をまとめ、
-// ピンは1個のまま・ポップアップに全件リスト表示する（クラスタ化して数字バッジに隠すのはNG＝常にピンを見せたい）
+// 同じ座標に重なる点をまとめ、ピンは1個のまま・ポップアップに全件リスト表示する
+// （クラスタ化して数字バッジに隠すのはNG＝常にピンを見せたい）
+// ⚠️ qth（相手QTH）はJCC/JCGコード単位（市区町村の代表点）で座標化しているため、
+//    同じ座標＝「同じ相手との複数回交信」とは限らず「同じ市区町村の別々の相手」も混ざる。
+//    そのためqthは地名をタイトルにし、行ごとにコールサインを明記する。
 function popupHtmlForPointGroup(sortedGroup) {
   const role = (sortedGroup[0].properties || {}).role;
-  const rows = sortedGroup.map((f) => {
-    const p = f.properties || {};
-    return `<div class="qso-row"><span class="qso-icon">📅</span>${escapeHtml(p.date || "")}｜${escapeHtml(p.band || "")}MHz ${escapeHtml(p.mode || "")}</div>`;
-  }).join("");
 
   if (role === "my_location") {
     const first = sortedGroup[0].properties || {};
     const name = (first.title || "").replace(/（運用地）\s*$/, "");
+    const rows = sortedGroup.map((f) => {
+      const p = f.properties || {};
+      return `<div class="qso-row"><span class="qso-icon">📅</span>${escapeHtml(p.date || "")}｜${escapeHtml(p.band || "")}MHz ${escapeHtml(p.mode || "")}</div>`;
+    }).join("");
     return `
       <div class="qso-popup">
         <span class="qso-title">📍 ${escapeHtml(name)}（${sortedGroup.length}件）</span>
@@ -203,21 +206,26 @@ function popupHtmlForPointGroup(sortedGroup) {
       </div>`;
   }
 
-  // qth
+  // qth：同じ市区町村内の別々の相手局がまとまっている可能性があるので、行ごとにコールサインを出す
   const first = sortedGroup[0].properties || {};
   const m = (first.title || "").match(/^(\S+)\s+(\S+)(?:（(.+)）)?$/);
   const place = m && m[3] ? m[3] : "";
+  const rows = sortedGroup.map((f) => {
+    const p = f.properties || {};
+    return `<div class="qso-row"><span class="qso-icon">📅</span>${escapeHtml(p.date || "")}｜${escapeHtml(p.callsign || "")}｜${escapeHtml(p.band || "")}MHz ${escapeHtml(p.mode || "")}</div>`;
+  }).join("");
   return `
     <div class="qso-popup">
-      <span class="qso-title">📡 ${escapeHtml(first.callsign || "")}（${sortedGroup.length}件）</span>
-      ${place ? `<div class="qso-row"><span class="qso-icon">🗾</span>${escapeHtml(place)}</div>` : ""}
+      <span class="qso-title">🗾 ${escapeHtml(place || "相手QTH")}（${sortedGroup.length}件）</span>
       ${rows}
     </div>`;
 }
 
 function bindHoverPopup(layer, html) {
   if (!html) return;
-  layer.bindPopup(html);
+  // autoPan:false＝ポップアップを出すときに地図がずれて動かないようにする
+  // （マウスオーバーのたびに表示位置が動くと見づらいため）
+  layer.bindPopup(html, { autoPan: false });
   // PCではマウスオーバーでも表示（タップ操作のスマホ・タブレットではクリックのまま動く）
   layer.on("mouseover", function () { layer.openPopup(); });
   layer.on("mouseout", function () { layer.closePopup(); });
