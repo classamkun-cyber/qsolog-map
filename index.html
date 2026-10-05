@@ -286,7 +286,9 @@ function addGeoJsonToMap(geojson) {
     const sorted = group.slice().sort((a, b) => String(b.properties && b.properties.date).localeCompare(String(a.properties && a.properties.date)));
     const rep = sorted[0];
     const coords = (rep.geometry && rep.geometry.coordinates) || [0, 0];
-    const marker = L.marker([coords[1], coords[0]], { icon: pointIconFor(rep.properties || {}) });
+    // 運用地（赤ピン）が相手QTH（グレーピン）の下に隠れないよう、常に手前に出す
+    const zIndexOffset = (rep.properties || {}).role === "my_location" ? 1000 : 0;
+    const marker = L.marker([coords[1], coords[0]], { icon: pointIconFor(rep.properties || {}), zIndexOffset: zIndexOffset });
     const html = sorted.length > 1 ? popupHtmlForPointGroup(sorted) : popupHtmlFor(rep.properties);
     bindHoverPopup(marker, html);
     // マーカーのpaneはLeafletの既定で線（overlayPane）より上に表示されるため、常にピンが線の上に来る
