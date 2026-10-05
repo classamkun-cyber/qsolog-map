@@ -33,8 +33,8 @@
   .qso-pin {
     border-radius: 50% 50% 50% 0;
     transform: rotate(-45deg);
-    border: 2px solid #fff;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.5);
+    border: 1.5px solid #fff;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.5);
   }
 </style>
 </head>
@@ -84,6 +84,7 @@ function lineColorFor(props) {
 }
 
 // 吹き出し型ピンアイコン（赤＝自分の運用地／グレー＝相手QTH）
+// サイズはcircleMarker相当（直径14px/12px）に近づけて小さめに
 function pinIcon(color, size) {
   return L.divIcon({
     className: "",
@@ -96,10 +97,10 @@ function pinIcon(color, size) {
 
 function pointIconFor(props) {
   if (props.role === "my_location") {
-    return pinIcon("#e74c3c", 28);
+    return pinIcon("#e74c3c", 16);
   }
   // qth（相手QTH）
-  return pinIcon("#7f8c8d", 24);
+  return pinIcon("#7f8c8d", 14);
 }
 
 function escapeHtml(s) {
