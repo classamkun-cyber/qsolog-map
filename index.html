@@ -14,8 +14,6 @@
 <link rel="apple-touch-icon" sizes="180x180" href="icon-180.png">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
-<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
 <style>
   html, body { margin: 0; padding: 0; height: 100%; background: #1e1e1e; }
   #map { width: 100%; height: 100vh; }
@@ -45,7 +43,6 @@
 <div id="map"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 <script>
 // ===== 設定 =====
 const API_KEY = "AIzaSyDuuX_9cIC-TiUP41NdQOhD8OTI885GAgY"; // Drive API（読み取り専用・Drive API限定）
@@ -156,11 +153,11 @@ function popupHtmlFor(props) {
   return props.title ? `<div class="qso-popup">${escapeHtml(props.title)}</div>` : "";
 }
 
-// 両端の座標が完全一致する線をまとめ、ポップアップにその組み合わせの全QSOをリスト表示する
-// （同じ運用地×同じ相手の組み合わせが繰り返されると線が重なって見分けられなくなるため）
-function groupLinesByEndpoints(lines) {
+// geometry.coordinatesが完全一致するfeature同士をまとめる（線・点どちらにも使う汎用グルーピング）
+// 線：両端の座標が同じ区間 / 点：同じ座標（同じ運用地・同じ相手QTH）をそれぞれ1つにまとめる
+function groupFeaturesByCoordinates(features) {
   const groups = new Map();
-  for (const f of lines) {
+  for (const f of features) {
     const coords = (f.geometry && f.geometry.coordinates) || [];
     const key = JSON.stringify(coords);
     if (!groups.has(key)) groups.set(key, []);
@@ -186,6 +183,38 @@ function popupHtmlForLineGroup(sortedGroup) {
     </div>`;
 }
 
+// 同じ座標に重なる点（同じ運用地からの複数QSO／同じ相手との複数回交信）をまとめ、
+// ピンは1個のまま・ポップアップに全件リスト表示する（クラスタ化して数字バッジに隠すのはNG＝常にピンを見せたい）
+function popupHtmlForPointGroup(sortedGroup) {
+  const role = (sortedGroup[0].properties || {}).role;
+  const rows = sortedGroup.map((f) => {
+    const p = f.properties || {};
+    return `<div class="qso-row"><span class="qso-icon">📅</span>${escapeHtml(p.date || "")}｜${escapeHtml(p.band || "")}MHz ${escapeHtml(p.mode || "")}</div>`;
+  }).join("");
+
+  if (role === "my_location") {
+    const first = sortedGroup[0].properties || {};
+    const name = (first.title || "").replace(/（運用地）\s*$/, "");
+    return `
+      <div class="qso-popup">
+        <span class="qso-title">📍 ${escapeHtml(name)}（${sortedGroup.length}件）</span>
+        <div class="qso-row"><span class="qso-icon">🏠</span>自分の運用地</div>
+        ${rows}
+      </div>`;
+  }
+
+  // qth
+  const first = sortedGroup[0].properties || {};
+  const m = (first.title || "").match(/^(\S+)\s+(\S+)(?:（(.+)）)?$/);
+  const place = m && m[3] ? m[3] : "";
+  return `
+    <div class="qso-popup">
+      <span class="qso-title">📡 ${escapeHtml(first.callsign || "")}（${sortedGroup.length}件）</span>
+      ${place ? `<div class="qso-row"><span class="qso-icon">🗾</span>${escapeHtml(place)}</div>` : ""}
+      ${rows}
+    </div>`;
+}
+
 function bindHoverPopup(layer, html) {
   if (!html) return;
   layer.bindPopup(html);
@@ -200,7 +229,7 @@ function addGeoJsonToMap(geojson) {
   const points = features.filter((f) => f.geometry && f.geometry.type === "Point");
 
   // ---- 線：同じ区間（両端の座標が同じ）は1本にまとめて描画 ----
-  const lineGroups = groupLinesByEndpoints(lines);
+  const lineGroups = groupFeaturesByCoordinates(lines);
   lineGroups.forEach((group) => {
     const sorted = group.slice().sort((a, b) => String(b.properties && b.properties.date).localeCompare(String(a.properties && a.properties.date)));
     const latest = sorted[0];
@@ -211,17 +240,18 @@ function addGeoJsonToMap(geojson) {
     polyline.addTo(map);
   });
 
-  // ---- 点：同じ場所に何件も重なるのでクラスタリング（タップで放射状に分離） ----
-  const cluster = L.markerClusterGroup({ maxClusterRadius: 40 });
-  points.forEach((f) => {
-    const coords = (f.geometry && f.geometry.coordinates) || [0, 0];
-    const marker = L.marker([coords[1], coords[0]], { icon: pointIconFor(f.properties || {}) });
-    bindHoverPopup(marker, popupHtmlFor(f.properties));
-    cluster.addLayer(marker);
+  // ---- 点：同じ座標（同じ運用地・同じ相手QTH）は1個のピンにまとめ、全件リストをポップアップに ----
+  const pointGroups = groupFeaturesByCoordinates(points);
+  pointGroups.forEach((group) => {
+    const sorted = group.slice().sort((a, b) => String(b.properties && b.properties.date).localeCompare(String(a.properties && a.properties.date)));
+    const rep = sorted[0];
+    const coords = (rep.geometry && rep.geometry.coordinates) || [0, 0];
+    const marker = L.marker([coords[1], coords[0]], { icon: pointIconFor(rep.properties || {}) });
+    const html = sorted.length > 1 ? popupHtmlForPointGroup(sorted) : popupHtmlFor(rep.properties);
+    bindHoverPopup(marker, html);
+    // マーカーのpaneはLeafletの既定で線（overlayPane）より上に表示されるため、常にピンが線の上に来る
+    marker.addTo(map);
   });
-  // マーカーのpaneはLeafletの既定で線（overlayPane）より上に表示されるため、
-  // 線を先・クラスタを後に addTo しておけば常にピンが線の上に来る
-  cluster.addTo(map);
 }
 
 function readCache() {
