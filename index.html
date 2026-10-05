@@ -26,6 +26,8 @@
   .qso-popup .qso-title { font-weight: bold; font-size: 14px; margin-bottom: 4px; display: block; }
   .qso-popup .qso-row { display: flex; align-items: center; gap: 6px; }
   .qso-popup .qso-icon { width: 1.4em; display: inline-block; text-align: center; }
+  /* 件数が多いリストは10件分くらいの高さで止めてスクロールにする（画面からのはみ出し対策） */
+  .qso-popup .qso-rows { max-height: 220px; overflow-y: auto; }
   .leaflet-popup-content-wrapper { background: #2b2b2b; color: #eee; }
   .leaflet-popup-tip { background: #2b2b2b; }
 
@@ -179,7 +181,7 @@ function popupHtmlForLineGroup(sortedGroup) {
     <div class="qso-popup">
       <span class="qso-title">📡 ${escapeHtml(to)}（${sortedGroup.length}件）</span>
       ${from ? `<div class="qso-row"><span class="qso-icon">🔁</span>${escapeHtml(from)} → ${escapeHtml(to)}</div>` : ""}
-      ${rows}
+      <div class="qso-rows">${rows}</div>
     </div>`;
 }
 
@@ -202,7 +204,7 @@ function popupHtmlForPointGroup(sortedGroup) {
       <div class="qso-popup">
         <span class="qso-title">📍 ${escapeHtml(name)}（${sortedGroup.length}件）</span>
         <div class="qso-row"><span class="qso-icon">🏠</span>自分の運用地</div>
-        ${rows}
+        <div class="qso-rows">${rows}</div>
       </div>`;
   }
 
@@ -217,7 +219,7 @@ function popupHtmlForPointGroup(sortedGroup) {
   return `
     <div class="qso-popup">
       <span class="qso-title">🗾 ${escapeHtml(place || "相手QTH")}（${sortedGroup.length}件）</span>
-      ${rows}
+      <div class="qso-rows">${rows}</div>
     </div>`;
 }
 
