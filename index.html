@@ -275,7 +275,13 @@ function addGeoJsonToMap(geojson) {
   });
 
   // ---- 点：同じ座標（同じ運用地・同じ相手QTH）は1個のピンにまとめ、全件リストをポップアップに ----
-  const pointGroups = groupFeaturesByCoordinates(points);
+  // ⚠️ my_location（運用地）とqth（相手QTH）は役割が違うのに座標が一致することがある
+  //   （例：運用地側を市区町村の概算座標にした場合、同じ市区町村のqthと同一座標になる）。
+  //   役割を混ぜてグループ化すると全く別の情報が1つのピンに混ざってしまうため、
+  //   必ずrole（my_location / qth）ごとに分けてからグループ化する。
+  const myLocationPoints = points.filter((f) => (f.properties || {}).role === "my_location");
+  const qthPoints = points.filter((f) => (f.properties || {}).role === "qth");
+  const pointGroups = groupFeaturesByCoordinates(myLocationPoints).concat(groupFeaturesByCoordinates(qthPoints));
   pointGroups.forEach((group) => {
     const sorted = group.slice().sort((a, b) => String(b.properties && b.properties.date).localeCompare(String(a.properties && a.properties.date)));
     const rep = sorted[0];
