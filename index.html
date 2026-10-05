@@ -281,15 +281,34 @@ function addGeoJsonToMap(geojson) {
   //   必ずrole（my_location / qth）ごとに分けてからグループ化する。
   const myLocationPoints = points.filter((f) => (f.properties || {}).role === "my_location");
   const qthPoints = points.filter((f) => (f.properties || {}).role === "qth");
-  const pointGroups = groupFeaturesByCoordinates(myLocationPoints).concat(groupFeaturesByCoordinates(qthPoints));
+  const myLocationGroups = groupFeaturesByCoordinates(myLocationPoints);
+  const qthGroups = groupFeaturesByCoordinates(qthPoints);
+
+  // 運用地を市区町村の概算座標にしているケース（名張市概算など）では、
+  // 同じ市区町村に住む相手局のqthピンと座標が完全一致することがある。
+  // 常に手前に出る運用地ピンの真下に隠れてクリックできなくなるのを防ぐため、
+  // 衝突しているqthピンだけ少しずらして両方クリックできるようにする。
+  const myLocationKeys = new Set(myLocationGroups.map((g) => JSON.stringify(g[0].geometry.coordinates)));
+  const NUDGE = 0.0015; // 緯度経度で約150m。低ズームでは誤差程度、重なり回避には十分
+
+  const pointGroups = myLocationGroups.concat(qthGroups);
   pointGroups.forEach((group) => {
     const sorted = group.slice().sort((a, b) => String(b.properties && b.properties.date).localeCompare(String(a.properties && a.properties.date)));
     const rep = sorted[0];
+    const role = (rep.properties || {}).role;
     const coords = (rep.geometry && rep.geometry.coordinates) || [0, 0];
+    let lat = coords[1];
+    let lng = coords[0];
+    if (role === "qth" && myLocationKeys.has(JSON.stringify(coords))) {
+      lat += NUDGE;
+      lng += NUDGE;
+    }
     // 運用地（赤ピン）が相手QTH（グレーピン）の下に隠れないよう、常に手前に出す
-    const zIndexOffset = (rep.properties || {}).role === "my_location" ? 1000 : 0;
-    const marker = L.marker([coords[1], coords[0]], { icon: pointIconFor(rep.properties || {}), zIndexOffset: zIndexOffset });
-    const html = sorted.length > 1 ? popupHtmlForPointGroup(sorted) : popupHtmlFor(rep.properties);
+    const zIndexOffset = role === "my_location" ? 1000 : 0;
+    const marker = L.marker([lat, lng], { icon: pointIconFor(rep.properties || {}), zIndexOffset: zIndexOffset });
+    // 1件だけの場所も含めて常に同じ形式（日付・コールサイン・バンド/モード）で表示する
+    // （件数で出し分けると、1件だけの運用地はQSO詳細が出ない簡易表示になってしまうため）
+    const html = popupHtmlForPointGroup(sorted);
     bindHoverPopup(marker, html);
     // マーカーのpaneはLeafletの既定で線（overlayPane）より上に表示されるため、常にピンが線の上に来る
     marker.addTo(map);
