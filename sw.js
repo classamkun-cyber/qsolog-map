@@ -1,4 +1,4 @@
-const CACHE = 'qsolog-map-v2';
+const CACHE = 'qsolog-map-v3';
 const ASSETS = ['./', './index.html', './manifest.webmanifest', './icon.png', './icon-192.png', './icon-180.png'];
 
 self.addEventListener('install', (e) => {
