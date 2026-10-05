@@ -2,8 +2,17 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, viewport-fit=cover">
 <title>QSOLOG運用地マップ（Webアプリ版）</title>
+<meta name="theme-color" content="#1e1e1e">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="QSOLOGマップ">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="icon" type="image/png" sizes="512x512" href="icon.png">
+<link rel="apple-touch-icon" sizes="180x180" href="icon-180.png">
+<link rel="manifest" href="manifest.webmanifest">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <style>
   html, body { margin: 0; padding: 0; height: 100%; background: #1e1e1e; }
@@ -19,6 +28,14 @@
   .qso-popup .qso-icon { width: 1.4em; display: inline-block; text-align: center; }
   .leaflet-popup-content-wrapper { background: #2b2b2b; color: #eee; }
   .leaflet-popup-tip { background: #2b2b2b; }
+
+  /* 吹き出し型ピン（Obsidian Leafletビューアに寄せたデザイン） */
+  .qso-pin {
+    border-radius: 50% 50% 50% 0;
+    transform: rotate(-45deg);
+    border: 2px solid #fff;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.5);
+  }
 </style>
 </head>
 <body>
@@ -66,12 +83,23 @@ function lineColorFor(props) {
   return bandColors[String(props.band)] || "#3388ff";
 }
 
-function pointStyleFor(props) {
+// 吹き出し型ピンアイコン（赤＝自分の運用地／グレー＝相手QTH）
+function pinIcon(color, size) {
+  return L.divIcon({
+    className: "",
+    html: `<div class="qso-pin" style="background:${color}; width:${size}px; height:${size}px;"></div>`,
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size], // ピンの先端（下端中央）を座標に合わせる
+    popupAnchor: [0, -size]
+  });
+}
+
+function pointIconFor(props) {
   if (props.role === "my_location") {
-    return { radius: 7, color: "#fff", weight: 1, fillColor: "#e74c3c", fillOpacity: 1 };
+    return pinIcon("#e74c3c", 28);
   }
   // qth（相手QTH）
-  return { radius: 6, color: "#fff", weight: 1, fillColor: "#7f8c8d", fillOpacity: 1 };
+  return pinIcon("#7f8c8d", 24);
 }
 
 function escapeHtml(s) {
@@ -126,7 +154,7 @@ function popupHtmlFor(props) {
 
 const commonGeoJsonOptions = {
   pointToLayer: function (feature, latlng) {
-    return L.circleMarker(latlng, pointStyleFor(feature.properties || {}));
+    return L.marker(latlng, { icon: pointIconFor(feature.properties || {}) });
   },
   style: function (feature) {
     if (feature.geometry && feature.geometry.type === "LineString") {
@@ -207,6 +235,10 @@ async function loadAll() {
 }
 
 loadAll();
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js'));
+}
 </script>
 </body>
 </html>
