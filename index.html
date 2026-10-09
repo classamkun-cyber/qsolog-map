@@ -16,12 +16,35 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <style>
   html, body { margin: 0; padding: 0; height: 100%; background: #1e1e1e; }
-  #map { width: 100%; height: 100vh; }
+  body { display: flex; flex-direction: column; }
+  #mapWrap { position: relative; flex: 1 1 auto; min-height: 0; }
+  #map { width: 100%; height: 100%; }
   #status {
     position: absolute; top: 8px; left: 8px; z-index: 1000;
     background: rgba(30,30,30,0.85); color: #eee; font-family: sans-serif;
     font-size: 13px; padding: 6px 10px; border-radius: 6px;
   }
+
+  /* ===== 絞り込みフィルターバー ===== */
+  #filterBar {
+    flex: 0 0 auto; z-index: 1100; position: relative;
+    display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+    background: #2b2b2b; color: #eee; font-family: sans-serif; font-size: 12px;
+    padding: 6px 10px; border-bottom: 1px solid #444;
+  }
+  #filterBar .filter-group { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  #filterBar .filter-label { font-weight: bold; color: #aaa; margin-right: 2px; }
+  #filterBar label.chk { display: inline-flex; align-items: center; gap: 3px; cursor: pointer; white-space: nowrap; }
+  #filterBar select, #filterBar input[type="date"] {
+    background: #1e1e1e; color: #eee; border: 1px solid #555; border-radius: 4px;
+    font-size: 12px; padding: 2px 4px;
+  }
+  #filterBar .date-sep { color: #888; }
+  #filterBar button#resetFilters {
+    background: #3a3a3a; color: #eee; border: 1px solid #555; border-radius: 4px;
+    font-size: 12px; padding: 3px 10px; cursor: pointer;
+  }
+  #filterBar button#resetFilters:hover { background: #4a4a4a; }
   .qso-popup { font-family: sans-serif; font-size: 13px; line-height: 1.6; min-width: 160px; }
   .qso-popup .qso-title { font-weight: bold; font-size: 14px; margin-bottom: 4px; display: block; }
   .qso-popup .qso-row { display: flex; align-items: center; gap: 6px; }
@@ -41,8 +64,23 @@
 </style>
 </head>
 <body>
-<div id="status">読み込み中...</div>
-<div id="map"></div>
+<div id="filterBar">
+  <div class="filter-group" id="bandGroup"><span class="filter-label">バンド</span></div>
+  <div class="filter-group" id="modeGroup"><span class="filter-label">モード</span></div>
+  <div class="filter-group">
+    <span class="filter-label">運用地</span>
+    <select id="siteSelect"><option value="__all__">すべて</option></select>
+  </div>
+  <div class="filter-group">
+    <span class="filter-label">期間</span>
+    <input type="date" id="dateFrom"><span class="date-sep">〜</span><input type="date" id="dateTo">
+  </div>
+  <button id="resetFilters">リセット</button>
+</div>
+<div id="mapWrap">
+  <div id="status">読み込み中...</div>
+  <div id="map"></div>
+</div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
@@ -257,8 +295,13 @@ function bindHoverPopup(layer, html) {
   });
 }
 
-function addGeoJsonToMap(geojson) {
-  const features = geojson.features || [];
+// 読み込んだ生データ（フィルター前の全件）。フィルターUI変更時に再フィルターして使う。
+let rawGeojson = null;
+// フィルター後の描画を乗せるレイヤーグループ（フィルター変更時はこれだけクリアして描き直す）
+const dataLayer = L.layerGroup().addTo(map);
+
+function renderFeatures(features) {
+  dataLayer.clearLayers();
   const lines = features.filter((f) => f.geometry && f.geometry.type === "LineString");
   const points = features.filter((f) => f.geometry && f.geometry.type === "Point");
 
@@ -271,7 +314,7 @@ function addGeoJsonToMap(geojson) {
     const polyline = L.polyline(latlngs, { color: lineColorFor(latest.properties || {}), weight: 3, opacity: 0.8 });
     const html = sorted.length > 1 ? popupHtmlForLineGroup(sorted) : popupHtmlFor(latest.properties);
     bindHoverPopup(polyline, html);
-    polyline.addTo(map);
+    polyline.addTo(dataLayer);
   });
 
   // ---- 点：同じ座標（同じ運用地・同じ相手QTH）は1個のピンにまとめ、全件リストをポップアップに ----
@@ -311,8 +354,121 @@ function addGeoJsonToMap(geojson) {
     const html = popupHtmlForPointGroup(sorted);
     bindHoverPopup(marker, html);
     // マーカーのpaneはLeafletの既定で線（overlayPane）より上に表示されるため、常にピンが線の上に来る
-    marker.addTo(map);
+    marker.addTo(dataLayer);
   });
+}
+
+// ===== 絞り込みフィルター =====
+const bandGroupEl = document.getElementById("bandGroup");
+const modeGroupEl = document.getElementById("modeGroup");
+const siteSelectEl = document.getElementById("siteSelect");
+const dateFromEl = document.getElementById("dateFrom");
+const dateToEl = document.getElementById("dateTo");
+const resetFiltersEl = document.getElementById("resetFilters");
+
+function getCheckedValues(groupEl) {
+  return Array.from(groupEl.querySelectorAll('input[type="checkbox"]'))
+    .filter((cb) => cb.checked)
+    .map((cb) => cb.value);
+}
+
+// チェックボックス（バンド/モード）を、実際のデータに出てくる値から動的に生成する
+// （今後バンドやモードが増えても、ここは手直し不要で自動的に反映される）
+function buildCheckboxGroup(groupEl, values) {
+  // 既存のチェックボックスは一旦削除（ラベルだけ残す）
+  groupEl.querySelectorAll("label.chk").forEach((el) => el.remove());
+  values.forEach((v) => {
+    const label = document.createElement("label");
+    label.className = "chk";
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.value = v;
+    cb.checked = true;
+    cb.addEventListener("change", applyFilters);
+    label.appendChild(cb);
+    label.appendChild(document.createTextNode(v));
+    groupEl.appendChild(label);
+  });
+}
+
+function buildSiteOptions(siteCounts) {
+  // "すべて"以外の既存optionを削除
+  Array.from(siteSelectEl.options).forEach((opt) => {
+    if (opt.value !== "__all__") opt.remove();
+  });
+  // 運用回数（QSO件数）の多い順に並べる
+  const sites = Array.from(siteCounts.keys()).sort((a, b) => siteCounts.get(b) - siteCounts.get(a));
+  sites.forEach((s) => {
+    const opt = document.createElement("option");
+    opt.value = s;
+    opt.textContent = `${s}（${siteCounts.get(s)}件）`;
+    siteSelectEl.appendChild(opt);
+  });
+}
+
+// 読み込んだ全featureから、バンド/モード/運用地の候補一覧を作ってフィルターUIを組み立てる
+function buildFilterUI(geojson) {
+  const features = geojson.features || [];
+  const bands = Array.from(new Set(features.map((f) => String((f.properties || {}).band || "")).filter(Boolean)))
+    .sort((a, b) => parseFloat(a) - parseFloat(b));
+  const modes = Array.from(new Set(features.map((f) => String((f.properties || {}).mode || "")).filter(Boolean)))
+    .sort((a, b) => a.localeCompare(b));
+
+  // 運用地ごとのQSO件数を数える（role="line"は1QSOにつき必ず1本なので、これで運用回数＝交信件数が数えられる）
+  const siteCounts = new Map();
+  features.forEach((f) => {
+    const p = f.properties || {};
+    if (p.role !== "line") return;
+    const s = String(p.site || "");
+    if (!s) return;
+    siteCounts.set(s, (siteCounts.get(s) || 0) + 1);
+  });
+
+  buildCheckboxGroup(bandGroupEl, bands);
+  buildCheckboxGroup(modeGroupEl, modes);
+  buildSiteOptions(siteCounts);
+}
+
+function getFilteredFeatures() {
+  if (!rawGeojson) return [];
+  const bands = getCheckedValues(bandGroupEl);
+  const modes = getCheckedValues(modeGroupEl);
+  const site = siteSelectEl.value;
+  const dateFrom = dateFromEl.value;
+  const dateTo = dateToEl.value;
+
+  return (rawGeojson.features || []).filter((f) => {
+    const p = f.properties || {};
+    if (!bands.includes(String(p.band || ""))) return false;
+    if (!modes.includes(String(p.mode || ""))) return false;
+    if (site !== "__all__" && String(p.site || "") !== site) return false;
+    const d = String(p.date || "");
+    if (dateFrom && d < dateFrom) return false;
+    if (dateTo && d > dateTo) return false;
+    return true;
+  });
+}
+
+function applyFilters() {
+  renderFeatures(getFilteredFeatures());
+}
+
+siteSelectEl.addEventListener("change", applyFilters);
+dateFromEl.addEventListener("change", applyFilters);
+dateToEl.addEventListener("change", applyFilters);
+resetFiltersEl.addEventListener("click", () => {
+  bandGroupEl.querySelectorAll('input[type="checkbox"]').forEach((cb) => (cb.checked = true));
+  modeGroupEl.querySelectorAll('input[type="checkbox"]').forEach((cb) => (cb.checked = true));
+  siteSelectEl.value = "__all__";
+  dateFromEl.value = "";
+  dateToEl.value = "";
+  applyFilters();
+});
+
+function addGeoJsonToMap(geojson) {
+  rawGeojson = geojson;
+  buildFilterUI(geojson);
+  renderFeatures(getFilteredFeatures());
 }
 
 function readCache() {
