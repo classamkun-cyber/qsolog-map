@@ -1,7 +1,9 @@
 {
+  "id": "/qsolog-map-v2/",
   "name": "QSOLOG運用地マップ",
   "short_name": "QSOLOGマップ",
-  "start_url": "./",
+  "start_url": "./?source=pwa",
+  "scope": "./",
   "display": "standalone",
   "background_color": "#1e1e1e",
   "theme_color": "#1e1e1e",
