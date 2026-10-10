@@ -467,8 +467,23 @@ function getFilteredFeatures() {
   });
 }
 
+// LineString(role="line")が1QSOにつき必ず1本なので、これを数えればQSO件数になる
+function countQso(features) {
+  return (features || []).filter((f) => f.geometry && f.geometry.type === "LineString").length;
+}
+
+function updateStatus() {
+  if (!rawGeojson) return;
+  const total = countQso(rawGeojson.features);
+  const filtered = countQso(getFilteredFeatures());
+  statusEl.textContent = filtered === total
+    ? `QSOLOG運用地マップ（${total} QSO）`
+    : `QSOLOG運用地マップ（${filtered} / ${total} QSO）`;
+}
+
 function applyFilters() {
   renderFeatures(getFilteredFeatures());
+  updateStatus();
 }
 
 siteSelectEl.addEventListener("change", applyFilters);
@@ -533,8 +548,7 @@ async function loadAll() {
     }
 
     addGeoJsonToMap(geojson);
-    const count = (geojson.features || []).length;
-    statusEl.textContent = `QSOLOG運用地マップ（${count} features）`;
+    updateStatus();
   } catch (e) {
     console.error(e);
     statusEl.textContent = "読み込みエラー: " + e.message;
