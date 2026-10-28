@@ -19,6 +19,10 @@
   body { display: flex; flex-direction: column; }
   #mapWrap { position: relative; flex: 1 1 auto; min-height: 0; }
   #map { width: 100%; height: 100%; }
+  /* 2026-10-12: 背景タイルの等高線だけを薄めようと試したが(グレースケール→
+     R成分基準の疑似グレースケール→彩度ダウン)、線形フィルターでは等高線だけを
+     狙い撃ちできず、どれも地図全体の色味を損なってしまったため、結局フィルター無し
+     (国土地理院 淡色地図そのまま)に戻すことにした。詳細はQSOLOG運用地マップ（Webアプリ版）開発ノート参照。 */
   #status {
     position: absolute; top: 8px; left: 8px; z-index: 1000;
     background: rgba(30,30,30,0.85); color: #eee; font-family: sans-serif;
@@ -47,6 +51,18 @@
   #filterBar button#resetFilters:hover { background: #4a4a4a; }
   /* バージョン表示：帯の右端に小さく（sw.jsのCACHEバージョンと連動させて、更新反映の確認用にも使う） */
   #appVersion { margin-left: auto; color: #777; font-size: 11px; white-space: nowrap; }
+  /* 2026-10-28: フィルター帯の表示/非表示トグル（▲で隠す／全画面時は地図右上の▼で戻す。起動時は常に表示） */
+  #filterBar.hidden { display: none; }
+  .bar-toggle {
+    background: #3a3a3a; color: #eee; border: 1px solid #555; border-radius: 4px;
+    font-size: 12px; line-height: 1; width: 26px; height: 22px; padding: 0; cursor: pointer;
+  }
+  .bar-toggle:hover { background: #4a4a4a; }
+  #showBarBtn {
+    display: none; position: absolute; top: 8px; right: 8px; z-index: 1000;
+    background: rgba(30,30,30,0.85); height: 28px; width: 32px; font-size: 14px;
+  }
+  #showBarBtn.visible { display: block; }
   .qso-popup { font-family: sans-serif; font-size: 13px; line-height: 1.6; min-width: 160px; }
   .qso-popup .qso-title { font-weight: bold; font-size: 14px; margin-bottom: 4px; display: block; }
   .qso-popup .qso-row { display: flex; align-items: center; gap: 6px; }
@@ -79,9 +95,11 @@
   </div>
   <button id="resetFilters">リセット</button>
   <span id="appVersion"></span>
+  <button id="hideBarBtn" class="bar-toggle" title="フィルターを隠して地図を全画面表示">▲</button>
 </div>
 <div id="mapWrap">
   <div id="status">読み込み中...</div>
+  <button id="showBarBtn" class="bar-toggle" title="フィルターを表示">▼</button>
   <div id="map"></div>
 </div>
 
@@ -93,7 +111,7 @@ const FOLDER_ID = "1LT5sBEmGKE9n8eEbqIuICZatIsz3mo3y"; // QSOLOG_WebApp フォ�
 const CACHE_KEY = "qsolog-map-cache-v1";
 // 画面右下（フィルターバー右端）に表示するバージョン番号。
 // sw.js の CACHE 定数と必ず同じ番号に揃えて上げること（ズレると「表示が反映されない」の原因調査に使えなくなる）
-const APP_VERSION = "v19";
+const APP_VERSION = "v20";
 document.addEventListener("DOMContentLoaded", () => {
   const el = document.getElementById("appVersion");
   if (el) el.textContent = APP_VERSION;
@@ -122,6 +140,21 @@ const modeColorOverride = {
 const statusEl = document.getElementById("status");
 
 const map = L.map("map").setView([34.9, 136.4], 7);
+
+// フィルター帯の表示/非表示（起動時は常に表示。状態は保存しない）
+(function setupBarToggle() {
+  const bar = document.getElementById("filterBar");
+  const hideBtn = document.getElementById("hideBarBtn");
+  const showBtn = document.getElementById("showBarBtn");
+  function setBarHidden(hidden) {
+    bar.classList.toggle("hidden", hidden);
+    showBtn.classList.toggle("visible", hidden);
+    // 地図の表示領域が変わるので、Leafletに大きさを再計算させる
+    setTimeout(() => map.invalidateSize(), 0);
+  }
+  hideBtn.addEventListener("click", () => setBarHidden(true));
+  showBtn.addEventListener("click", () => setBarHidden(false));
+})();
 L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png", {
   maxZoom: 18,
   attribution: "&copy; <a href='https://maps.gsi.go.jp/development/ichiran.html'>国土地理院</a>"
